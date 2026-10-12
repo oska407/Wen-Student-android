@@ -1,7 +1,7 @@
 package com.wenwen.student;
 
 import android.Manifest;
-import android.app.Activity;
+import androidx.appcompat.app.AppCompatActivity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
@@ -29,6 +29,8 @@ import com.google.zxing.common.HybridBinarizer;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -37,7 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * CameraX 负责出画面，ZXing 负责把画面里的二维码解成文本，
  * 解析后把原文塞回 Intent 交回 MainActivity（具体格式由 MainActivity 自己认）。
  */
-public class ScanActivity extends Activity {
+public class ScanActivity extends AppCompatActivity {
 
     public static final String EXTRA_RESULT = "scan_result";
     private static final int REQ_CAMERA = 1001;
@@ -109,7 +111,9 @@ public class ScanActivity extends Activity {
         private final MultiFormatReader reader = new MultiFormatReader();
 
         {
-            reader.setHints(DecodeHintType.POSSIBLE_FORMATS, Arrays.asList(BarcodeFormat.QR_CODE));
+            Map<DecodeHintType, Object> hints = new HashMap<>();
+            hints.put(DecodeHintType.POSSIBLE_FORMATS, Arrays.asList(BarcodeFormat.QR_CODE));
+            reader.setHints(hints);
         }
 
         @Override
@@ -135,7 +139,7 @@ public class ScanActivity extends Activity {
 
         private Result decode(ImageProxy image) throws NotFoundException {
             LuminanceSource source = buildSource(image);
-            if (source == null) throw new NotFoundException();
+            if (source == null) throw NotFoundException.getNotFoundInstance();
             return reader.decode(new BinaryBitmap(new HybridBinarizer(source)));
         }
 
@@ -149,7 +153,7 @@ public class ScanActivity extends Activity {
                 byte[] y = new byte[w * h];
                 yBuf.rewind();
                 yBuf.get(y);
-                return new PlanarYUVLuminanceSource(y, w, h, rowStride, 0);
+                return new PlanarYUVLuminanceSource(y, w, h, 0, 0, w, h, false);
             } catch (Throwable t) {
                 return null;
             }

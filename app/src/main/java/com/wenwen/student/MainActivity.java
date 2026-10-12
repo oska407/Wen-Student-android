@@ -396,7 +396,7 @@ public class MainActivity extends Activity {
             // 自签证书：app 自己放行（按用户拍板维持无差别放行；不装系统 CA）
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler,
-                                           android.webkit.SslError error) {
+                                           android.net.http.SslError error) {
                 handler.proceed();
             }
 
@@ -434,7 +434,8 @@ public class MainActivity extends Activity {
         // student.js 之前注册、透明拦截写操作。student.js 一行不用改。
         webView.addJavascriptInterface(new WenwenBridge(), "WenwenBridge");
         try {
-            webView.addScriptToEvaluateOnNewDocument(BOOTSTRAP_JS);
+            java.lang.reflect.Method m = webView.getClass().getMethod("addScriptToEvaluateOnNewDocument", String.class);
+            m.invoke(webView, BOOTSTRAP_JS);
         } catch (Exception e) {
             // 低版本 WebView 不支持该方法则退回 onPageFinished 注册（见 injectServiceWorker）
         }
