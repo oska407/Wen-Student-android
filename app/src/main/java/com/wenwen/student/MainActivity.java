@@ -19,6 +19,7 @@ import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -415,7 +416,7 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            public void onReceivedError(WebView view, WebResourceError error) {
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 statusText.setText("打不开 · 检查电脑是否开机、手机是否连同一个 WiFi");
                 statusText.setTextColor(Color.parseColor("#BA7517"));
             }
