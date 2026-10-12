@@ -1,0 +1,86 @@
+# 云端打包：编译 APK + 顺手生成一台连接二维码
+#
+# 怎么跑：仓库页面 → 顶部 Actions 页签 → 左边选 "打包安卓 APK" → 右边 Run workflow
+#         （第一次要先 Push 一次代码，Actions 页签才会出现）
+name: 打包安卓 APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: '电脑地址（ip:端口），二维码就指向它'
+        required: false
+        default: '192.168.3.15:3000'
+  push:
+    branches: [ 'main', 'master' ]
+
+env:
+  DEFAULT_SERVER: 192.168.3.15:3000
+
+jobs:
+  # ---------------------------------------------------------------- 二维码
+  qr:
+    name: 生成连接二维码
+    runs-on: ubuntu-latest
+    steps:
+      - name: 安装二维码生成库
+        run: pip install --quiet segno
+
+      - name: 生成二维码图片
+        run: |
+          python - <<'PY'
+          import segno
+          srv = "${{ github.event.inputs.server || env.DEFAULT_SERVER }}"
+          payload = "wenwen://connect?h=" + srv
+          name = "connect-qr-" + srv.replace(":", "-") + ".png"
+          segno.make(payload, error="m").save(
+              name, scale=14, border=4, dark="#2C2C2A", light="#FFFFFF")
+          print("二维码内容:", payload)
+          print("输出文件:", name)
+          PY
+
+      - name: 上传二维码
+        uses: actions/upload-artifact@v4
+        with:
+          name: 连接二维码
+          path: connect-qr-*.png
+          retention-days: 60
+
+  # ---------------------------------------------------------------- APK
+  build:
+    name: 编译 APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拿到工程代码
+        uses: actions/checkout@v4
+
+      - name: 装 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 装 Android SDK（34）
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
+      - name: 接受 SDK 许可
+        run: yes | sdkmanager --licenses || true
+
+      - name: 编译 debug APK
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: '8.9'
+          arguments: assembleDebug
+          build-root-directory: .
+
+      - name: 看看产物
+        run: ls -lh app/build/outputs/apk/debug/
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wenwen-student-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 60

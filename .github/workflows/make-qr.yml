@@ -1,0 +1,41 @@
+# 只生成连接二维码（编译二十分钟，二维码几秒钟）
+#
+# 什么时候用：手机已经装过 App 了，只是电脑换了个 IP
+# 怎么跑：仓库 → Actions → 选 "只生成连接二维码" → Run workflow → 填新 IP
+name: 只生成连接二维码
+
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: '新的电脑地址（ip:端口）'
+        required: false
+        default: '192.168.3.15:3000'
+
+jobs:
+  qr:
+    name: 生成二维码
+    runs-on: ubuntu-latest
+    steps:
+      - name: 安装二维码生成库
+        run: pip install --quiet segno
+
+      - name: 生成二维码图片
+        run: |
+          python - <<'PY'
+          import segno
+          srv = "${{ github.event.inputs.server || '192.168.3.15:3000' }}"
+          payload = "wenwen://connect?h=" + srv
+          name = "connect-qr-" + srv.replace(":", "-") + ".png"
+          segno.make(payload, error="m").save(
+              name, scale=14, border=4, dark="#2C2C2A", light="#FFFFFF")
+          print("二维码内容:", payload)
+          print("输出文件:", name)
+          PY
+
+      - name: 上传二维码
+        uses: actions/upload-artifact@v4
+        with:
+          name: 连接二维码
+          path: connect-qr-*.png
+          retention-days: 60
