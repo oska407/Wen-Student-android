@@ -2,6 +2,7 @@ package com.wenwen.student;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
@@ -105,6 +106,7 @@ public class MainActivity extends Activity {
 
         // 设置面板上的按钮
         findViewById(R.id.changeServerBtn).setOnClickListener(v -> showSetup("换服务器 / 重连"));
+        findViewById(R.id.forceRefreshBtn).setOnClickListener(v -> forceRefresh());
         findViewById(R.id.savePinBtn).setOnClickListener(v -> savePin());
         findViewById(R.id.settingsCloseBtn).setOnClickListener(v -> hidePanels());
 
@@ -409,6 +411,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                // 强制刷新是「一次性」的绕过缓存，加载完立刻恢复默认，
+                // 否则离线模式的 cache-first 会被永久绕开。
+                try { view.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT); } catch (Exception ignored) {}
                 // 兜底：个别 WebView 版本不支持 addScriptToEvaluateOnNewDocument，
                 // 这里再跑一次引导（注册 SW + 转发状态）。注册幂等，重复执行无害。
                 try { view.evaluateJavascript(BOOTSTRAP_JS, null); } catch (Exception e) {}
@@ -447,6 +452,29 @@ public class MainActivity extends Activity {
         buildBrowser();
         webView.loadUrl(baseUrl + "/student");
         statusText.setText("正在连接…");
+    }
+
+    /**
+     * 强制刷新：清掉 WebView 的 HTTP 缓存，绕过缓存重新拉一次页面。
+     * 只影响这一次加载——加载完成后 onPageFinished 会把缓存模式恢复成默认，
+     * 否则离线模式下 SW 的 cache-first 会被绕过、做题页面反而打不开。
+     * 注意：clearCache 只清 HTTP 缓存，不动 SW 的 CacheStorage，离线包依然在。
+     */
+    private void forceRefresh() {
+        if (webView == null || TextUtils.isEmpty(baseUrl)) {
+            Toast.makeText(this, "还没连上服务器，先扫码或手动输入地址", Toast.LENGTH_LONG).show();
+            return;
+        }
+        hidePanels();
+        Toast.makeText(this, "正在强制刷新…", Toast.LENGTH_SHORT).show();
+        try {
+            webView.clearCache(true);
+            webView.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+        } catch (Throwable ignored) {
+        }
+        webView.loadUrl(baseUrl + "/student");
+        statusText.setText("正在强制刷新…");
+        statusText.setTextColor(Color.parseColor("#0F6E56"));
     }
 
     /** 页面脚本之前注入的引导：注册 sw.js + 转发 SW 状态到 WenwenBridge。
@@ -491,6 +519,20 @@ public class MainActivity extends Activity {
             final boolean fOn = online;
             final int fP = pending;
             runOnUiThread(() -> applyStatus(fOn, fP));
+        }
+
+        /**
+         * JS → Java 桥：按页面锁定屏幕方向。
+         *   "portrait" → 学生端锁竖屏（只有直板形态，不存在平板 / 横屏布局）
+         *   其它（"auto" / "sensor"）→ 跟随系统旋转（家长管理端横竖都能用）
+         * 页面没调用时行为与从前完全一致（跟随系统），未重新打包的旧 App 不受影响。
+         */
+        @JavascriptInterface
+        public void setOrientation(String mode) {
+            final int req = "portrait".equals(mode)
+                    ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+            runOnUiThread(() -> setRequestedOrientation(req));
         }
     }
 

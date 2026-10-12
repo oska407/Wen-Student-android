@@ -209,6 +209,26 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp" />
 
+        <Button
+            android:id="@+id/forceRefreshBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/btn_primary"
+            android:text="强 制 刷 新"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center_horizontal"
+            android:lineSpacingExtra="2dp"
+            android:text="清掉本机缓存再重新加载页面\n（页面卡住、排版错乱或改了样式时用）"
+            android:textColor="#8A8880"
+            android:textSize="11sp" />
+
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
