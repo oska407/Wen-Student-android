@@ -56,6 +56,11 @@ public class MainActivity extends Activity {
     private String baseUrl;
     private boolean browserBuilt = false;
     private boolean audioUnlocked = false;
+    // 【离线壳自愈】自签证书下 SW 注册失败 ⇒ 离线冷启动只能靠 WebView HTTP 缓存。
+    // offlineCacheMode=true 时缓存模式切 LOAD_CACHE_ELSE_NETWORK（无视新鲜度直接用缓存副本）；
+    // 回联后恢复 LOAD_DEFAULT；若离线期间主文档加载失败过，回联自动重载一次页面。
+    private boolean offlineCacheMode = false;
+    private boolean lastMainLoadFailed = false;
 
     private WebView webView;
     // 离线同步状态（由注入的 JS 层经 WenwenBridge 上报）：待重放场次数与在线标记
@@ -411,9 +416,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                // 强制刷新是「一次性」的绕过缓存，加载完立刻恢复默认，
-                // 否则离线模式的 cache-first 会被永久绕开。
-                try { view.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT); } catch (Exception ignored) {}
+                // 强制刷新是「一次性」的绕过缓存，加载完立刻恢复——
+                // 恢复目标随离线状态：离线中保持 LOAD_CACHE_ELSE_NETWORK（否则离线模式的缓存兜底被绕开）
+                try { view.getSettings().setCacheMode(offlineCacheMode ? WebSettings.LOAD_CACHE_ELSE_NETWORK : WebSettings.LOAD_DEFAULT); } catch (Exception ignored) {}
                 // 兜底：个别 WebView 版本不支持 addScriptToEvaluateOnNewDocument，
                 // 这里再跑一次引导（注册 SW + 转发状态）。注册幂等，重复执行无害。
                 try { view.evaluateJavascript(BOOTSTRAP_JS, null); } catch (Exception e) {}
@@ -422,8 +427,18 @@ public class MainActivity extends Activity {
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                boolean mainFrame = request != null && request.isForMainFrame();
+                if (mainFrame) lastMainLoadFailed = true;
                 statusText.setText("打不开 · 检查电脑是否开机、手机是否连同一个 WiFi");
                 statusText.setTextColor(Color.parseColor("#BA7517"));
+                // 【离线壳自愈】主文档加载失败（断网冷启动/刷新）：切到「只用缓存」模式就地重载一次，
+                // 让此前在线时缓存的页面骨架顶上（配合服务端对 /student + ?v= 资源的可缓存头）。
+                // 已在缓存模式再失败（缓存里真没有）就不重载，避免死循环。
+                if (mainFrame && !offlineCacheMode && request.getUrl() != null) {
+                    offlineCacheMode = true;
+                    try { view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK); } catch (Exception ignored) {}
+                    view.loadUrl(request.getUrl().toString());
+                }
             }
         });
 
@@ -452,6 +467,61 @@ public class MainActivity extends Activity {
         buildBrowser();
         webView.loadUrl(baseUrl + "/student");
         statusText.setText("正在连接…");
+        probeConnectivity();
+    }
+
+    /**
+     * 【离线壳自愈】直连探测服务器（不依赖 SW——自签证书下 SW 在 WebView 里注册不了）：
+     *  · 服务器不可达 → 切 LOAD_CACHE_ELSE_NETWORK，此后所有请求只走 HTTP 缓存副本；
+     *  · 恢复可达 → 切回 LOAD_DEFAULT；若离线期间主文档失败过，自动重载一次页面。
+     * 在 onCreate/loadStudentPage/onResume 触发；onReceivedError 会在失败当下先行切换，不必等本探测。
+     */
+    private void probeConnectivity() {
+        if (TextUtils.isEmpty(baseUrl) || webView == null) return;
+        final String url = baseUrl + "/api/info";
+        new Thread(() -> {
+            boolean reachable = false;
+            try {
+                javax.net.ssl.HttpsURLConnection conn = (javax.net.ssl.HttpsURLConnection) new java.net.URL(url).openConnection();
+                conn.setConnectTimeout(2500);
+                conn.setReadTimeout(2500);
+                conn.setInstanceFollowRedirects(false);
+                try {  // 自签证书：与 WebView 的 onReceivedSslError 同策略放行（仅内网自用）
+                    javax.net.ssl.TrustManager[] tms = new javax.net.ssl.TrustManager[]{
+                            new javax.net.ssl.X509TrustManager() {
+                                public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                                public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                                public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; }
+                            }
+                    };
+                    javax.net.ssl.SSLContext sc = javax.net.ssl.SSLContext.getInstance("TLS");
+                    sc.init(null, tms, new java.security.SecureRandom());
+                    conn.setSSLSocketFactory(sc.getSocketFactory());
+                    conn.setHostnameVerifier((hostname, session) -> true);
+                } catch (Exception ignored) {}
+                reachable = conn.getResponseCode() == 200;
+                conn.disconnect();
+            } catch (Exception e) {
+                reachable = false;
+            }
+            final boolean ok = reachable;
+            runOnUiThread(() -> {
+                if (webView == null) return;
+                if (ok) {
+                    if (offlineCacheMode) {
+                        offlineCacheMode = false;
+                        try { webView.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT); } catch (Exception ignored) {}
+                        if (lastMainLoadFailed) {
+                            lastMainLoadFailed = false;
+                            webView.loadUrl(baseUrl + "/student");
+                        }
+                    }
+                } else if (!offlineCacheMode) {
+                    offlineCacheMode = true;
+                    try { webView.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK); } catch (Exception ignored) {}
+                }
+            });
+        }).start();
     }
 
     /**
@@ -463,6 +533,11 @@ public class MainActivity extends Activity {
     private void forceRefresh() {
         if (webView == null || TextUtils.isEmpty(baseUrl)) {
             Toast.makeText(this, "还没连上服务器，先扫码或手动输入地址", Toast.LENGTH_LONG).show();
+            return;
+        }
+        // 离线中禁止强刷：clearCache 会把仅有的缓存副本抹掉，之后离线冷启动就真没页面可用了
+        if (offlineCacheMode) {
+            Toast.makeText(this, "当前离线：等连上电脑后再强刷", Toast.LENGTH_LONG).show();
             return;
         }
         hidePanels();
@@ -573,6 +648,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshStatus();
+        probeConnectivity();   // 回前台时探测一次：断网→切缓存模式；回联→恢复并按需重载
     }
 
     @Override
