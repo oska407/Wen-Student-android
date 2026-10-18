@@ -389,7 +389,7 @@ public class MainActivity extends Activity {
         s.setLoadWithOverviewMode(false);
         s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
-        s.setUserAgentString(s.getUserAgentString() + " wenwen-student-android/1.2");
+        s.setUserAgentString(s.getUserAgentString() + " wenwen-student-android/1.3");
 
         // 首次触摸解锁 AudioContext（避免 direct 模式首题无声）
         webView.setOnTouchListener((v, e) -> {
