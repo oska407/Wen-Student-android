@@ -61,6 +61,9 @@ public class MainActivity extends Activity {
     // 回联后恢复 LOAD_DEFAULT；若离线期间主文档加载失败过，回联自动重载一次页面。
     private boolean offlineCacheMode = false;
     private boolean lastMainLoadFailed = false;
+    // 【2026-10-18 热点场景】真实连通性（直连 /api/info 探测结果）。SW 在自签证书下注册不了，
+    // jsOnline 只会永远是默认 true ⇒ 顶栏「在线」是假象。顶栏文案由此字段与 jsOnline 共同决定。
+    private boolean netOk = true;
 
     private WebView webView;
     // 离线同步状态（由注入的 JS 层经 WenwenBridge 上报）：待重放场次数与在线标记
@@ -433,11 +436,14 @@ public class MainActivity extends Activity {
                 statusText.setTextColor(Color.parseColor("#BA7517"));
                 // 【离线壳自愈】主文档加载失败（断网冷启动/刷新）：切到「只用缓存」模式就地重载一次，
                 // 让此前在线时缓存的页面骨架顶上（配合服务端对 /student + ?v= 资源的可缓存头）。
-                // 已在缓存模式再失败（缓存里真没有）就不重载，避免死循环。
+                // 已在缓存模式再失败（缓存里真没有，如本次修复前缓存头未生效期间的存量设备）→
+                // 载入内置资产兜底页：友好提示 + 重试按钮，绝不再给 Chromium 原生错误页/白屏。
                 if (mainFrame && !offlineCacheMode && request.getUrl() != null) {
                     offlineCacheMode = true;
                     try { view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK); } catch (Exception ignored) {}
                     view.loadUrl(request.getUrl().toString());
+                } else if (mainFrame && offlineCacheMode) {
+                    try { view.loadUrl("file:///android_asset/offline_fallback.html"); } catch (Exception ignored) {}
                 }
             }
         });
@@ -507,6 +513,7 @@ public class MainActivity extends Activity {
             final boolean ok = reachable;
             runOnUiThread(() -> {
                 if (webView == null) return;
+                netOk = ok;
                 if (ok) {
                     if (offlineCacheMode) {
                         offlineCacheMode = false;
@@ -516,9 +523,15 @@ public class MainActivity extends Activity {
                             webView.loadUrl(baseUrl + "/student");
                         }
                     }
-                } else if (!offlineCacheMode) {
-                    offlineCacheMode = true;
-                    try { webView.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK); } catch (Exception ignored) {}
+                    refreshStatus();          // 回联：恢复按 jsOnline（离线模式语义）渲染顶栏
+                } else {
+                    if (!offlineCacheMode) {
+                        offlineCacheMode = true;
+                        try { webView.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK); } catch (Exception ignored) {}
+                    }
+                    // 真实连通性直达顶栏：热点=系统有网但连不上电脑时，不再谎报「在线」
+                    statusText.setText("📵 连不上电脑 · 已缓存页面仍可离线做题，回家自动恢复");
+                    statusText.setTextColor(Color.parseColor("#BA7517"));
                 }
             });
         }).start();
@@ -608,6 +621,20 @@ public class MainActivity extends Activity {
                     ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
             runOnUiThread(() -> setRequestedOrientation(req));
+        }
+
+        /**
+         * JS → Java 桥：离线兜底页「重试」按钮 → 重新探测 + 重新加载学生端页面。
+         * 只由用户点击触发（兜底页无自动轮询），不存在循环重载风险。
+         */
+        @JavascriptInterface
+        public void retry() {
+            runOnUiThread(() -> {
+                if (webView == null) return;
+                lastMainLoadFailed = false;
+                statusText.setText("正在连接…");
+                loadStudentPage();
+            });
         }
     }
 
